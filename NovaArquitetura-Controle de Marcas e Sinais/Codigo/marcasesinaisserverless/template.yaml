@@ -1,0 +1,330 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  python3.9
+  SAM Template para serverless-marcas-sinais
+Parameters:
+  Environment:
+    Type: String
+    Description: AWS Environment onde o codigo esta sendo executado (AWS_SAM_LOCAL or AWS)
+    Default: 'AWS'
+
+  DynamoDBUri:
+    Type: String
+    Description: Instancia local do AWS DynamoDB URI
+    Default: 'http://docker.for.mac.host.internal:8000'
+  
+  ProjectName:
+    Type: String
+    Description: 'Nome do projeto'
+    Default: 'serverless-marcas-sinais'
+
+Globals:
+  Function:
+    Timeout: 120
+    MemorySize: 2048 
+    EphemeralStorage:
+      Size: 2048
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        DYNAMODB_DEV_URI: !Ref DynamoDBUri
+        PERSONS_TABLE_NAME: !Ref PersonsTable
+        CREATE_SQS_QUEUE: !Ref CreatePersonsQueue
+        UPDATE_SQS_QUEUE: !Ref UpdatePersonsQueue
+        DELETE_SQS_QUEUE: !Ref DeletePersonsQueue
+        DEADLETTER_SQS_QUEUE: !Ref DeadLetterQueue
+        DEADLETTER_SNS_TOPIC: !Ref DeadLetterTopic
+
+Resources:
+  PersonsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Join ['-', [!Sub '${ProjectName}', 'persons']]
+      AttributeDefinitions:
+        - AttributeName: cpf
+          AttributeType: S        
+      KeySchema:
+        - AttributeName: cpf
+          KeyType: HASH     
+      ProvisionedThroughput:
+        ReadCapacityUnits: 3
+        WriteCapacityUnits: 3
+        
+  SnsToSqsPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "Allow SNS publish to SQS"
+            Effect: Allow
+            Principal: 
+              Service: "sns.amazonaws.com"
+            Resource: !GetAtt DeadLetterQueue.Arn
+            Action: SQS:SendMessage
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref DeadLetterTopic
+      Queues:
+        - Ref: DeadLetterQueue 
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Join ['-', [!Sub '${ProjectName}', 'deadLetterQueue']]
+      VisibilityTimeout: 120 
+
+  DeadLetterTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: sqs
+          Endpoint: !GetAtt DeadLetterQueue.Arn
+
+  CreatePersonsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Join ['-', [!Sub '${ProjectName}', 'createPersons']]
+      VisibilityTimeout: 120  
+
+  CreatePersonFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Join ['-', [!Sub '${ProjectName}', 'createPerson']]
+      PackageType: Image
+      ImageConfig:
+        Command:
+          - createPerson.lambda_handler
+      Architectures:
+        - x86_64
+      Events:
+        CreatePersonAPI:
+          Type: Api
+          Properties:
+            Path: /person
+            Method: post
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt CreatePersonsQueue.QueueName
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./src
+      DockerTag: python3.9-v1
+
+  UpdatePersonsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Join ['-', [!Sub '${ProjectName}', 'updatePersons']]
+      VisibilityTimeout: 120  
+
+  UpdatePersonFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Join ['-', [!Sub '${ProjectName}', 'updatePerson']]
+      PackageType: Image
+      ImageConfig:
+        Command:
+          - updatePerson.lambda_handler
+      Architectures:
+        - x86_64
+      Events:
+        UpdatePersonAPI:
+          Type: Api
+          Properties:
+            Path: /person
+            Method: put
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt UpdatePersonsQueue.QueueName
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./src
+      DockerTag: python3.9-v1
+  
+  DeletePersonsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Join ['-', [!Sub '${ProjectName}', 'deletePersons']]
+      VisibilityTimeout: 120  
+
+  DeletePersonFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Join ['-', [!Sub '${ProjectName}', 'deletePerson']]
+      PackageType: Image
+      ImageConfig:
+        Command:
+          - deletePerson.lambda_handler
+      Architectures:
+        - x86_64
+      Events:
+        DeletePersonAPI:
+          Type: Api
+          Properties:
+            Path: /person
+            Method: delete
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt DeletePersonsQueue.QueueName
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./src
+      DockerTag: python3.9-v1
+
+  CreateProcessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Join ['-', [!Sub '${ProjectName}', 'createProcess']]
+      PackageType: Image
+      ImageConfig:
+        Command:
+          - createProcess.lambda_handler
+      Architectures:
+        - x86_64
+      Policies:
+        - AmazonDynamoDBFullAccess
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt DeadLetterTopic.TopicName
+      Events:
+        SqsEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt CreatePersonsQueue.Arn
+            BatchSize: 1
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./src
+      DockerTag: python3.9-v1
+  
+  UpdateProcessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Join ['-', [!Sub '${ProjectName}', 'updateProcess']]
+      PackageType: Image
+      ImageConfig:
+        Command:
+          - updateProcess.lambda_handler
+      Architectures:
+        - x86_64
+      Policies:
+        - AmazonDynamoDBFullAccess
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt DeadLetterTopic.TopicName
+      Events:
+        SqsEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt UpdatePersonsQueue.Arn
+            BatchSize: 1
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./src
+      DockerTag: python3.9-v1
+  
+  DeleteProcessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Join ['-', [!Sub '${ProjectName}', 'deleteProcess']]
+      PackageType: Image
+      ImageConfig:
+        Command:
+          - deleteProcess.lambda_handler
+      Architectures:
+        - x86_64
+      Policies:
+        - AmazonDynamoDBFullAccess
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt DeadLetterTopic.TopicName
+      Events:
+        SqsEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt DeletePersonsQueue.Arn
+            BatchSize: 1
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./src
+      DockerTag: python3.9-v1
+
+  GetPersonFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Join ['-', [!Sub '${ProjectName}', 'getPerson']]
+      PackageType: Image
+      ImageConfig:
+        Command:
+          - getPerson.lambda_handler
+      Architectures:
+        - x86_64
+      Policies:
+        - AmazonDynamoDBFullAccess
+      Events:
+        GetPersonAPI:
+          Type: Api
+          Properties:
+            Path: /person
+            Method: get
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./src
+      DockerTag: python3.9-v1
+
+Outputs:
+  PersonAPI:
+    Description: "API Gateway endpoint URL para Prod stage para Persons functions"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/person"
+  DeadLetterQueue:
+    Description: "SQS Queue para DeadLetter"
+    Value: !GetAtt DeadLetterQueue.Arn
+  DeadLetterTopicName:
+    Description: SNS DeadLetterTopic Name
+    Value: !GetAtt DeadLetterTopic.TopicName  
+  DeadLetterTopic:
+    Description: SNS DeadLetterTopic ARN
+    Value: !Ref DeadLetterTopic
+  CreatePersonFunction:
+    Description: "CreatePerson Lambda Function ARN"
+    Value: !GetAtt CreatePersonFunction.Arn
+  CreatePersonFunctionIamRole:
+    Description: "Implicit IAM Role created para CreatePerson function"
+    Value: !GetAtt CreatePersonFunctionRole.Arn
+  UpdatePersonFunction:
+    Description: "UpdatePerson Lambda Function ARN"
+    Value: !GetAtt UpdatePersonFunction.Arn
+  UpdatePersonFunctionIamRole:
+    Description: "Implicit IAM Role created para UpdatePerson function"
+    Value: !GetAtt UpdatePersonFunctionRole.Arn
+  DeletePersonFunction:
+    Description: "DeletePerson Lambda Function ARN"
+    Value: !GetAtt DeletePersonFunction.Arn
+  DeletePersonFunctionIamRole:
+    Description: "Implicit IAM Role created para DeletePerson function"
+    Value: !GetAtt DeletePersonFunctionRole.Arn
+  PersonsTable:
+    Description: "DynamoDB Table para Persons"
+    Value: !GetAtt PersonsTable.Arn
+  CreatePersonsQueue:
+    Description: "SQS Queue para Create Persons"
+    Value: !GetAtt CreatePersonsQueue.Arn
+  UpdatePersonsQueue:
+    Description: "SQS Queue para Update Persons"
+    Value: !GetAtt UpdatePersonsQueue.Arn
+  DeletePersonsQueue:
+    Description: "SQS Queue para Delete Persons"
+    Value: !GetAtt DeletePersonsQueue.Arn
+  CreateProcessFunction:
+    Description: "CreateProcess Lambda Function ARN"
+    Value: !GetAtt CreateProcessFunction.Arn
+  UpdateProcessFunction:
+    Description: "UpdateProcess Lambda Function ARN"
+    Value: !GetAtt UpdateProcessFunction.Arn
+  DeleteProcessFunction:
+    Description: "DeleteProcess Lambda Function ARN"
+    Value: !GetAtt DeleteProcessFunction.Arn
+  GetPersonFunction:
+    Description: "GetPerson Lambda Function ARN"
+    Value: !GetAtt GetPersonFunction.Arn
+  GetPersonFunctionIamRole:
+    Description: "Implicit IAM Role created para GetPerson function"
+    Value: !GetAtt GetPersonFunctionRole.Arn

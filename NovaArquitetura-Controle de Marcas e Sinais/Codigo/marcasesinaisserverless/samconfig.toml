@@ -1,0 +1,12 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "marcasesinais"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-9vandtje16kx"
+s3_prefix = "marcasesinais"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=\"AWS\" DynamoDBUri=\"http://docker.for.mac.host.internal:8000\" ProjectName=\"serverless-marcas-sinais\""
+image_repositories = ["CreatePersonFunction=284607219089.dkr.ecr.us-east-1.amazonaws.com/marcasesinaisc97178f5/createpersonfunctione5866aa1repo", "UpdatePersonFunction=284607219089.dkr.ecr.us-east-1.amazonaws.com/marcasesinaisc97178f5/updatepersonfunction6659c419repo", "DeletePersonFunction=284607219089.dkr.ecr.us-east-1.amazonaws.com/marcasesinaisc97178f5/deletepersonfunctiond72da874repo", "CreateProcessFunction=284607219089.dkr.ecr.us-east-1.amazonaws.com/marcasesinaisc97178f5/createprocessfunction22fd53d1repo", "UpdateProcessFunction=284607219089.dkr.ecr.us-east-1.amazonaws.com/marcasesinaisc97178f5/updateprocessfunctionddbcaff5repo", "DeleteProcessFunction=284607219089.dkr.ecr.us-east-1.amazonaws.com/marcasesinaisc97178f5/deleteprocessfunction800c6e92repo", "GetPersonFunction=284607219089.dkr.ecr.us-east-1.amazonaws.com/marcasesinaisc97178f5/getpersonfunctionc593efd1repo"]
